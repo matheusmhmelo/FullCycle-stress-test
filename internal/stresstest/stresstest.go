@@ -26,18 +26,23 @@ type testsResult struct {
 }
 
 func ExecuteTests(cmd *cobra.Command, _ []string) {
+	// Prepare initial config based on CLI flags
 	config, err := initializeTests(cmd)
 	if err != nil {
 		newError(err)
 		return
 	}
+
+	// Prepare channels to handle tests
 	results := make(chan testsResult, config.concurrency)
 	start := make(chan struct{})
 	limitChan := make(chan struct{}, config.requests)
 	ctx, cancel := context.WithCancel(context.Background())
 
+	// go routine to handle limit of requests
 	go config.limit(ctx, cancel, limitChan)
 
+	// preparing go routines to concurrency
 	fmt.Println("Preparing concurrency...")
 	wg := &sync.WaitGroup{}
 	for i := 0; i < config.concurrency; i++ {
@@ -48,6 +53,7 @@ func ExecuteTests(cmd *cobra.Command, _ []string) {
 		}(i)
 	}
 
+	// start tests
 	fmt.Println("Running tests...")
 
 	startTime := time.Now()
@@ -55,6 +61,7 @@ func ExecuteTests(cmd *cobra.Command, _ []string) {
 	wg.Wait()
 	endTime := time.Since(startTime)
 
+	// get results from go routines
 	finalResult := testsResult{
 		failures: map[string]int{},
 	}
@@ -73,6 +80,7 @@ func ExecuteTests(cmd *cobra.Command, _ []string) {
 		}
 	}
 
+	// report results
 	fmt.Println("Tests finished in ", endTime.String())
 	fmt.Println("Total Request: ", finalResult.requests)
 	fmt.Println("Successes (HTTP 200): ", finalResult.successes)
@@ -83,6 +91,7 @@ func (cfg *testsConfig) run(ctx context.Context, start <-chan struct{}, limit ch
 	results := testsResult{
 		failures: map[string]int{},
 	}
+	// wait to start all requests at same time
 	<-start
 
 	for {
@@ -91,6 +100,7 @@ func (cfg *testsConfig) run(ctx context.Context, start <-chan struct{}, limit ch
 			res <- results
 			return
 		default:
+			// do request
 			client := http.DefaultClient
 			req, _ := http.NewRequestWithContext(ctx, "GET", cfg.url, nil)
 			response, err := client.Do(req)
@@ -106,6 +116,7 @@ func (cfg *testsConfig) run(ctx context.Context, start <-chan struct{}, limit ch
 				continue
 			}
 
+			// check response
 			if response.StatusCode == http.StatusOK {
 				results.successes++
 			} else {
